@@ -41,17 +41,17 @@ export class TempoEngine {
   private context: AudioContext;
   private stretch: StretchNode | null = null;
   private currentRate = 1;
-  private outputStream: MediaStreamAudioDestinationNode;
-  private outputElement: HTMLAudioElement;
+  private keepAliveElement: HTMLAudioElement;
 
   constructor(context: AudioContext) {
     this.context = context;
-    // Output goes through an <audio> element rather than straight to the
-    // context destination: mobile OSes treat a playing element as media
-    // playback, so audio survives screen lock and gets lock-screen controls.
-    this.outputStream = context.createMediaStreamDestination();
-    this.outputElement = new Audio();
-    this.outputElement.srcObject = this.outputStream.stream;
+    // Music plays straight to the context destination (single clock, no
+    // resampling — routing it through an element caused audible pitch
+    // wobble). This silent looping element runs alongside purely so the OS
+    // treats the tab as media playback: audio survives screen lock and the
+    // Media Session card gets an anchor.
+    this.keepAliveElement = new Audio('/silence.mp3');
+    this.keepAliveElement.loop = true;
   }
 
   private async ensureStretch(): Promise<StretchNode> {
@@ -59,7 +59,7 @@ export class TempoEngine {
       return this.stretch;
     }
     const stretch = await SignalsmithStretch(this.context);
-    stretch.connect(this.outputStream);
+    stretch.connect(this.context.destination);
     await stretch.setUpdateInterval(0.05);
     this.stretch = stretch;
     return stretch;
@@ -82,8 +82,8 @@ export class TempoEngine {
     // Kick the element synchronously so the call stays inside the user
     // gesture that (first) triggered playback; later programmatic plays are
     // allowed because the element was gesture-activated once.
-    this.outputElement.play().catch(() => {
-      // Autoplay rejection surfaces as silence; the next tap fixes it.
+    this.keepAliveElement.play().catch(() => {
+      // Keep-alive rejection only affects lock-screen survival, not audio.
     });
     const stretch = await this.ensureStretch();
     if (this.context.state === 'suspended') {
@@ -99,7 +99,7 @@ export class TempoEngine {
   async pause(): Promise<void> {
     const stretch = await this.ensureStretch();
     await stretch.schedule({ active: false });
-    this.outputElement.pause();
+    this.keepAliveElement.pause();
   }
 
   async seek(toSeconds: number): Promise<void> {
