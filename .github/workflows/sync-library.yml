@@ -6,14 +6,28 @@ on:
   # schedule:
   #   - cron: '0 4 * * *'
 
+concurrency:
+  group: sync-library
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
+
+      # yt-dlp needs a JS runtime to solve YouTube's download challenges.
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
 
       - name: Install spotdl + ffmpeg
         run: |
@@ -32,17 +46,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Download playlist
+      # Bucket-first dedupe: placeholders make spotDL skip tracks already
+      # in the bucket, so only new playlist entries get downloaded.
+      - name: Mark already-synced tracks
+        run: node scripts/prepare-library-placeholders.mjs library
+
+      - name: Download new tracks
         env:
           PLAYLIST_URL: ${{ vars.PLAYLIST_URL }}
         run: |
-          mkdir -p library
-          spotdl download "$PLAYLIST_URL" --output "library/{artist} - {title}.{output-ext}"
+          spotdl download "$PLAYLIST_URL" --output "library/{artist} - {title}.{output-ext}" \
+            | tee spotdl.log
+          if grep -q "AudioProviderError" spotdl.log; then
+            echo "::error::spotdl failed to download one or more tracks (see log above)"
+            exit 1
+          fi
 
       - name: Upload new tracks to R2
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: node scripts/upload-library.mjs library

@@ -56,3 +56,14 @@ export async function fetchTrackUrl(key: string): Promise<string> {
 export async function triggerLibrarySync(): Promise<void> {
   await apiFetch('/api/sync', { method: 'POST' });
 }
+
+export type SyncStatus = {
+  status: 'none' | 'queued' | 'in_progress' | 'completed';
+  conclusion: string | null;
+  startedAt: string | null;
+};
+
+export async function fetchSyncStatus(): Promise<SyncStatus> {
+  const response = await apiFetch('/api/sync');
+  return (await response.json()) as SyncStatus;
+}

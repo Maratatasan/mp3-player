@@ -46,7 +46,8 @@ let skipped = 0;
 for (const name of localFiles) {
   const path = join(folder, name);
   const { size } = await stat(path);
-  if (remote.get(name) === size) {
+  // Zero-byte files are bucket placeholders (see prepare-library-placeholders).
+  if (size === 0 || remote.get(name) === size) {
     skipped += 1;
     continue;
   }

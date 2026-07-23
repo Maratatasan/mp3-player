@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { triggerLibrarySync } from './api/client';
+import { useLibrarySync } from './hooks/useLibrarySync';
 import { cn } from './lib/cn';
 import {
   DEFAULT_TARGET_BPM,
@@ -115,16 +115,7 @@ function App() {
       });
   }
 
-  function handleSync() {
-    setLibraryStatus('starting cloud sync…');
-    triggerLibrarySync()
-      .then(() => {
-        setLibraryStatus('sync started — new tracks land in a few minutes, then hit refresh');
-      })
-      .catch((error: unknown) => {
-        setLibraryStatus(error instanceof Error ? error.message : 'sync failed');
-      });
-  }
+  const sync = useLibrarySync(handleRefresh);
 
   useEffect(() => {
     activeRowRef.current?.scrollIntoView({ block: 'nearest' });
@@ -303,15 +294,31 @@ function App() {
               </button>
               <button
                 type="button"
-                className="rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
-                onClick={handleSync}
+                disabled={sync.phase !== 'idle'}
+                className={cn(
+                  'relative overflow-hidden rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300',
+                  sync.phase === 'idle' ? 'hover:bg-zinc-700' : 'cursor-default text-zinc-500',
+                )}
+                onClick={sync.startSync}
               >
-                ☁ sync
+                {sync.phase === 'waiting' && (
+                  <span
+                    className="absolute inset-y-0 left-0 bg-emerald-400/25 transition-[width] duration-1000 ease-linear"
+                    style={{ width: `${sync.progress * 100}%` }}
+                  />
+                )}
+                <span className={cn('relative', sync.phase === 'polling' && 'animate-pulse')}>
+                  {sync.phase === 'idle' && '☁ sync'}
+                  {sync.phase === 'waiting' && '☁ syncing…'}
+                  {sync.phase === 'polling' && '☁ checking…'}
+                </span>
               </button>
             </div>
           </div>
-          {libraryStatus !== '' && (
-            <p className="mb-2 text-xs text-zinc-500">{libraryStatus}</p>
+          {(libraryStatus !== '' || sync.message !== '') && (
+            <p className="mb-2 text-xs text-zinc-500">
+              {[sync.message, libraryStatus].filter(Boolean).join(' · ')}
+            </p>
           )}
           <ul className="flex flex-col gap-1">
             {player.queue.map((queued, index) => {
