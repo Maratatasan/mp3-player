@@ -9,6 +9,40 @@ export const MAX_TARGET_BPM = 200;
 
 const LAST_TRACK_STORAGE_KEY = 'mp3-player-last-track';
 const TARGET_BPM_STORAGE_KEY = 'mp3-player-target-bpm';
+const QUEUE_ORDER_STORAGE_KEY = 'mp3-player-queue-order';
+
+function saveQueueOrder(entries: { key: string }[]): void {
+  localStorage.setItem(QUEUE_ORDER_STORAGE_KEY, JSON.stringify(entries.map((e) => e.key)));
+}
+
+// Applies the persisted queue order: known keys in their saved positions,
+// tracks new to the library appended in listing (alphabetical) order.
+function applySavedOrder(entries: QueueEntry[]): QueueEntry[] {
+  const raw = localStorage.getItem(QUEUE_ORDER_STORAGE_KEY);
+  if (raw === null) {
+    return entries;
+  }
+  let savedKeys: string[];
+  try {
+    savedKeys = JSON.parse(raw) as string[];
+  } catch {
+    return entries;
+  }
+  const rank = new Map(savedKeys.map((key, index) => [key, index]));
+  const known = entries
+    .filter((entry) => rank.has(entry.key))
+    .sort((a, b) => (rank.get(a.key) as number) - (rank.get(b.key) as number));
+  const fresh = entries.filter((entry) => !rank.has(entry.key));
+  return [...known, ...fresh];
+}
+function shuffled<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+  }
+  return copy;
+}
 
 function initialTargetBpm(): number {
   const stored = Number(localStorage.getItem(TARGET_BPM_STORAGE_KEY));
@@ -51,13 +85,14 @@ let singletonPromise: Promise<PlayerSingleton> | null = null;
 
 async function buildEntries(): Promise<QueueEntry[]> {
   const listing = await fetchTracks();
-  return Promise.all(
+  const entries = await Promise.all(
     listing.map(async (remote) => {
       const entry = entryFromListing(remote.key, remote.title);
       const cachedBpm = await getCachedBpm(remote.key);
       return cachedBpm === undefined ? entry : { ...entry, originalBpm: cachedBpm };
     }),
   );
+  return applySavedOrder(entries);
 }
 
 function initPlayer(): Promise<PlayerSingleton> {
@@ -135,6 +170,8 @@ export type PlayerState = {
   setTargetBpm: (bpm: number) => void;
   toggleOriginalTempo: () => void;
   refreshLibrary: () => Promise<number>;
+  shuffleQueue: () => void;
+  resetQueueOrder: () => void;
 };
 
 function rateFor(originalBpm: number, targetBpm: number, isOriginalTempo: boolean): number {
@@ -155,6 +192,10 @@ export function usePlayer(): PlayerState {
   const [positionSeconds, setPositionSeconds] = useState(0);
   const [targetBpm, setTargetBpmState] = useState(initialTargetBpm);
   const [isOriginalTempo, setIsOriginalTempo] = useState(false);
+  // Track keys we've been on, so back() retraces steps even after reorders.
+  const historyRef = useRef<string[]>([]);
+
+  const currentKey = queue[trackIndex]?.key ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -231,32 +272,42 @@ export function usePlayer(): PlayerState {
         }
       });
 
-    const nextEntry = queue[(trackIndex + 1) % queue.length];
-    if (nextEntry && nextEntry.key !== entry.key) {
-      ensureLoaded(context, nextEntry)
-        .then((track) => {
-          if (!cancelled) {
-            setQueue((previous) =>
-              previous.map((queued) =>
-                queued.key === track.key && queued.originalBpm === null
-                  ? { ...queued, originalBpm: track.originalBpm }
-                  : queued,
-              ),
-            );
-          }
-        })
-        .catch(() => {
-          // Prefetch failures surface when the track is actually selected.
-        });
-    }
-
     return () => {
       cancelled = true;
     };
-    // targetBpm / tempo-mode / isPlaying changes are handled by their own
-    // paths; this effect must only run on selection or queue-shape changes.
+    // Keyed to the track identity, not its position — reordering the queue
+    // must not restart the currently playing track.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackIndex, queue.length, loadAttempt]);
+  }, [currentKey, loadAttempt]);
+
+  // Prefetch the visible next-in-queue so skipping feels instant.
+  useEffect(() => {
+    const context = contextRef.current;
+    if (!context || queue.length < 2) {
+      return;
+    }
+    let cancelled = false;
+    const nextEntry = queue[(trackIndex + 1) % queue.length];
+    ensureLoaded(context, nextEntry)
+      .then((track) => {
+        if (!cancelled) {
+          setQueue((previous) =>
+            previous.map((queued) =>
+              queued.key === track.key && queued.originalBpm === null
+                ? { ...queued, originalBpm: track.originalBpm }
+                : queued,
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        // Prefetch failures surface when the track is actually selected.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKey, queue.length, trackIndex]);
 
   useEffect(() => {
     if (!isPlaying || !currentTrack) {
@@ -270,7 +321,7 @@ export function usePlayer(): PlayerState {
       const position = engine.positionSeconds();
       if (position >= currentTrack.durationSeconds) {
         setPositionSeconds(0);
-        setTrackIndex((prev) => (prev + 1) % queue.length);
+        goToTrack((trackIndex + 1) % queue.length);
       } else {
         setPositionSeconds(position);
       }
@@ -278,10 +329,26 @@ export function usePlayer(): PlayerState {
     return () => {
       clearInterval(interval);
     };
-  }, [isPlaying, currentTrack, queue.length]);
+    // goToTrack is stable per render; trackIndex is included via deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, currentTrack, queue.length, trackIndex]);
+
+  // Central navigation: records where we came from so back() can retrace.
+  function goToTrack(index: number) {
+    if (index === trackIndex) {
+      return;
+    }
+    if (currentKey !== null) {
+      historyRef.current.push(currentKey);
+      if (historyRef.current.length > 100) {
+        historyRef.current.shift();
+      }
+    }
+    setTrackIndex(index);
+  }
 
   function selectTrack(index: number) {
-    setTrackIndex(index);
+    goToTrack(index);
   }
 
   function playPause() {
@@ -300,8 +367,8 @@ export function usePlayer(): PlayerState {
   }
 
   function next() {
-    if (queue.length > 0) {
-      setTrackIndex((prev) => (prev + 1) % queue.length);
+    if (queue.length > 1) {
+      goToTrack((trackIndex + 1) % queue.length);
     }
   }
 
@@ -314,7 +381,45 @@ export function usePlayer(): PlayerState {
       void engineRef.current?.seek(0);
       return;
     }
-    setTrackIndex((prev) => (prev - 1 + queue.length) % queue.length);
+    const previousKey = historyRef.current.pop();
+    const previousIndex =
+      previousKey === undefined
+        ? -1
+        : queue.findIndex((queued) => queued.key === previousKey);
+    setTrackIndex(previousIndex === -1 ? (trackIndex - 1 + queue.length) % queue.length : previousIndex);
+  }
+
+  // Reorders the visible queue; the playing track keeps playing (the load
+  // effect is keyed on track identity) and just moves to its new position.
+  function reorderQueue(
+    reorder: (entries: QueueEntry[]) => QueueEntry[],
+    persistOrder: boolean,
+  ) {
+    const reordered = reorder(queue);
+    setQueue(reordered);
+    if (persistOrder) {
+      saveQueueOrder(reordered);
+    } else {
+      localStorage.removeItem(QUEUE_ORDER_STORAGE_KEY);
+    }
+    const index = reordered.findIndex((queued) => queued.key === currentKey);
+    setTrackIndex(index === -1 ? 0 : index);
+  }
+
+  // The current track leads the new order; the rest shuffles behind it.
+  function shuffleQueue() {
+    reorderQueue((entries) => {
+      const current = entries.find((queued) => queued.key === currentKey);
+      const rest = shuffled(entries.filter((queued) => queued.key !== currentKey));
+      return current ? [current, ...rest] : rest;
+    }, true);
+  }
+
+  function resetQueueOrder() {
+    reorderQueue(
+      (entries) => [...entries].sort((a, b) => a.key.localeCompare(b.key)),
+      false,
+    );
   }
 
   function seek(seconds: number) {
@@ -387,5 +492,7 @@ export function usePlayer(): PlayerState {
     setTargetBpm,
     toggleOriginalTempo,
     refreshLibrary,
+    shuffleQueue,
+    resetQueueOrder,
   };
 }

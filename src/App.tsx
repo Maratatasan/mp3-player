@@ -8,6 +8,10 @@ import {
   usePlayer,
 } from './audio/usePlayer';
 
+// Flip to true to bring back the refresh + cloud-sync buttons (see the
+// comment at their render site for why they're hidden).
+const SHOW_LIBRARY_BUTTONS = false;
+
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
@@ -251,8 +255,17 @@ function App() {
 
         <section
           aria-label="Playback controls"
-          className="flex items-center justify-center gap-6"
+          className="flex items-center justify-center gap-5"
         >
+          <button
+            type="button"
+            aria-label="Shuffle queue"
+            title="Shuffle queue"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
+            onClick={player.shuffleQueue}
+          >
+            🔀
+          </button>
           <button
             type="button"
             className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl hover:bg-zinc-700"
@@ -277,6 +290,15 @@ function App() {
           >
             ⏭
           </button>
+          <button
+            type="button"
+            aria-label="Reset queue order"
+            title="Reset queue order"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
+            onClick={player.resetQueueOrder}
+          >
+            ↺
+          </button>
         </section>
 
         <section aria-label="Queue" className="min-h-0 flex-1 overflow-y-auto text-left">
@@ -284,7 +306,12 @@ function App() {
             <h2 className="text-xs uppercase tracking-widest text-zinc-500">
               Queue · {player.queue.length} tracks
             </h2>
-            <div className="flex gap-2">
+            {/* Hidden for now: cloud sync fails from CI — YouTube bot-checks
+                GitHub's datacenter IPs, so the workflow can't download new
+                tracks. Re-enable once sync runs somewhere with a residential
+                IP (e.g. a self-hosted runner at home). Library updates in the
+                meantime: ./scripts/sync-library.sh on the Mac. */}
+            <div className={cn('flex gap-2', !SHOW_LIBRARY_BUTTONS && 'hidden')}>
               <button
                 type="button"
                 className="rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
