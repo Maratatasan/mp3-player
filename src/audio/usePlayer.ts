@@ -332,6 +332,24 @@ export function usePlayer(): PlayerState {
     });
     navigator.mediaSession.setActionHandler('nexttrack', next);
     navigator.mediaSession.setActionHandler('previoustrack', back);
+    // Lock-screen scrubbing feeds the same seek path as the in-app bar.
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      if (details.seekTime !== undefined) {
+        seek(details.seekTime);
+      }
+    });
+    // Position/duration/rate snapshot: reported in track-seconds; the OS
+    // advances the bar itself using playbackRate between our updates (this
+    // effect re-runs alongside the 200ms position poll while playing).
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: currentTrack.durationSeconds,
+        position: Math.min(positionSeconds, currentTrack.durationSeconds),
+        playbackRate: rateFor(currentTrack.originalBpm, targetBpm, isOriginalTempo),
+      });
+    } catch {
+      // Some browsers implement mediaSession without setPositionState.
+    }
     // Re-registering on each relevant state change keeps closures fresh.
   });
 
