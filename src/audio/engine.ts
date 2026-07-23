@@ -41,9 +41,17 @@ export class TempoEngine {
   private context: AudioContext;
   private stretch: StretchNode | null = null;
   private currentRate = 1;
+  private outputStream: MediaStreamAudioDestinationNode;
+  private outputElement: HTMLAudioElement;
 
   constructor(context: AudioContext) {
     this.context = context;
+    // Output goes through an <audio> element rather than straight to the
+    // context destination: mobile OSes treat a playing element as media
+    // playback, so audio survives screen lock and gets lock-screen controls.
+    this.outputStream = context.createMediaStreamDestination();
+    this.outputElement = new Audio();
+    this.outputElement.srcObject = this.outputStream.stream;
   }
 
   private async ensureStretch(): Promise<StretchNode> {
@@ -51,7 +59,7 @@ export class TempoEngine {
       return this.stretch;
     }
     const stretch = await SignalsmithStretch(this.context);
-    stretch.connect(this.context.destination);
+    stretch.connect(this.outputStream);
     await stretch.setUpdateInterval(0.05);
     this.stretch = stretch;
     return stretch;
@@ -71,6 +79,12 @@ export class TempoEngine {
   }
 
   async play(fromSeconds?: number): Promise<void> {
+    // Kick the element synchronously so the call stays inside the user
+    // gesture that (first) triggered playback; later programmatic plays are
+    // allowed because the element was gesture-activated once.
+    this.outputElement.play().catch(() => {
+      // Autoplay rejection surfaces as silence; the next tap fixes it.
+    });
     const stretch = await this.ensureStretch();
     if (this.context.state === 'suspended') {
       await this.context.resume();
@@ -85,6 +99,7 @@ export class TempoEngine {
   async pause(): Promise<void> {
     const stretch = await this.ensureStretch();
     await stretch.schedule({ active: false });
+    this.outputElement.pause();
   }
 
   async seek(toSeconds: number): Promise<void> {

@@ -309,6 +309,32 @@ export function usePlayer(): PlayerState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey, queue.length, trackIndex]);
 
+  // Lock-screen / notification media card: metadata, controls, position.
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentTrack) {
+      return;
+    }
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.title,
+      artist: currentTrack.artist,
+      album: 'Tempo Player',
+    });
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    navigator.mediaSession.setActionHandler('play', () => {
+      if (!isPlaying) {
+        playPause();
+      }
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (isPlaying) {
+        playPause();
+      }
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', next);
+    navigator.mediaSession.setActionHandler('previoustrack', back);
+    // Re-registering on each relevant state change keeps closures fresh.
+  });
+
   useEffect(() => {
     if (!isPlaying || !currentTrack) {
       return;
