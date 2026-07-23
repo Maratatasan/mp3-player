@@ -17,20 +17,20 @@ export type LoadedTrack = Omit<TrackSource, 'url'> & {
 // Steady DJ-style material sits well inside the detector's default 90-180 window.
 const TEMPO_SETTINGS = { minTempo: 90, maxTempo: 180 };
 
-export async function loadTrack(
+// decodeAudioData detaches the ArrayBuffer it's given — callers that need to
+// keep the bytes (e.g. for caching) must pass a copy.
+export async function prepareTrack(
   context: AudioContext,
-  source: TrackSource,
+  meta: Omit<TrackSource, 'url'>,
+  bytes: ArrayBuffer,
+  knownBpm: number | null,
 ): Promise<LoadedTrack> {
-  const response = await fetch(source.url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch audio for ${source.key}: ${response.status}`);
-  }
-  const buffer = await context.decodeAudioData(await response.arrayBuffer());
-  const { bpm } = await guess(buffer, TEMPO_SETTINGS);
+  const buffer = await context.decodeAudioData(bytes);
+  const bpm = knownBpm ?? (await guess(buffer, TEMPO_SETTINGS)).bpm;
   return {
-    key: source.key,
-    title: source.title,
-    artist: source.artist,
+    key: meta.key,
+    title: meta.title,
+    artist: meta.artist,
     buffer,
     originalBpm: bpm,
     durationSeconds: buffer.duration,

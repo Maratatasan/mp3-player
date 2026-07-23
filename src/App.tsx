@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from './lib/cn';
 import {
   DEFAULT_TARGET_BPM,
@@ -14,7 +14,7 @@ function formatTime(totalSeconds: number): string {
 }
 
 type TempoBoxProps = {
-  value: number;
+  value: number | string;
   label: string;
   sublabel: string;
   isActive: boolean;
@@ -98,7 +98,14 @@ function PassphraseGate({ onSubmit }: PassphraseGateProps) {
 
 function App() {
   const player = usePlayer();
-  const track = player.tracks[player.trackIndex];
+  const activeRowRef = useRef<HTMLLIElement | null>(null);
+  const entry = player.queue[player.trackIndex];
+
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [player.trackIndex, player.queue.length]);
+  const track = player.currentTrack;
+  const originalBpm = track?.originalBpm ?? entry?.originalBpm ?? null;
 
   if (player.needsPassphrase) {
     return <PassphraseGate onSubmit={player.submitPassphrase} />;
@@ -112,30 +119,35 @@ function App() {
     );
   }
 
-  if (player.isLoading || !track) {
+  if (player.isLoading || !entry) {
     return (
       <main className="flex min-h-svh items-center justify-center bg-zinc-950 text-zinc-400">
-        <p className="animate-pulse">Analyzing tracks…</p>
+        <p className="animate-pulse">Loading library…</p>
       </main>
     );
   }
 
   return (
     <div className="flex min-h-svh items-center justify-center bg-zinc-950 text-zinc-100">
-      <main className="flex w-full min-h-svh flex-col justify-center gap-7 bg-zinc-900 px-5 py-8 text-center sm:min-h-0 sm:w-105 sm:rounded-2xl sm:p-8 sm:shadow-2xl">
+      <main className="flex max-h-svh w-full min-h-svh flex-col gap-7 bg-zinc-900 px-5 py-8 text-center sm:min-h-0 sm:max-h-[90svh] sm:w-105 sm:rounded-2xl sm:p-8 sm:shadow-2xl">
         <header>
-          <h1 className="text-2xl font-semibold">{track.title}</h1>
-          <p className="mt-1 text-zinc-400">{track.artist}</p>
+          <h1 className="text-2xl font-semibold">{entry.title}</h1>
+          <p className="mt-1 text-zinc-400">
+            {entry.artist}
+            {player.isTrackLoading ? ' · loading…' : ''}
+          </p>
         </header>
 
         <section aria-label="Tempo" className="flex gap-4">
           <TempoBox
-            value={player.isOriginalTempo ? track.originalBpm : player.targetBpm}
+            value={player.isOriginalTempo ? (originalBpm ?? '—') : player.targetBpm}
             label="current BPM"
             sublabel={
               player.isOriginalTempo
                 ? 'following original'
-                : `target · at ${(player.targetBpm / track.originalBpm).toFixed(2)}×`
+                : originalBpm === null
+                  ? 'target'
+                  : `target · at ${(player.targetBpm / originalBpm).toFixed(2)}×`
             }
             isActive={!player.isOriginalTempo}
             onSelect={() => {
@@ -188,7 +200,7 @@ function App() {
             </button>
           </TempoBox>
           <TempoBox
-            value={track.originalBpm}
+            value={originalBpm ?? '—'}
             label="original BPM"
             sublabel={player.isOriginalTempo ? 'playing original tempo' : 'tap to play original'}
             isActive={player.isOriginalTempo}
@@ -207,16 +219,17 @@ function App() {
           <input
             type="range"
             min={0}
-            max={Math.floor(track.durationSeconds)}
-            value={Math.min(player.positionSeconds, track.durationSeconds)}
+            max={track ? Math.floor(track.durationSeconds) : 1}
+            value={track ? Math.min(player.positionSeconds, track.durationSeconds) : 0}
+            disabled={!track}
             onChange={(event) => {
               player.seek(Number(event.target.value));
             }}
-            className="h-11 w-full accent-emerald-400"
+            className="h-11 w-full accent-emerald-400 disabled:opacity-40"
             aria-label="Seek"
           />
           <span className="min-w-10 text-sm tabular-nums text-zinc-400">
-            {formatTime(track.durationSeconds)}
+            {track ? formatTime(track.durationSeconds) : '–:––'}
           </span>
         </section>
 
@@ -250,15 +263,15 @@ function App() {
           </button>
         </section>
 
-        <section aria-label="Queue" className="text-left">
+        <section aria-label="Queue" className="min-h-0 flex-1 overflow-y-auto text-left">
           <h2 className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
-            Queue
+            Queue · {player.queue.length} tracks
           </h2>
           <ul className="flex flex-col gap-1">
-            {player.tracks.map((queued, index) => {
+            {player.queue.map((queued, index) => {
               const isActive = index === player.trackIndex;
               return (
-                <li key={queued.key}>
+                <li key={queued.key} ref={isActive ? activeRowRef : null}>
                   <button
                     type="button"
                     className={cn(
@@ -272,10 +285,10 @@ function App() {
                     }}
                   >
                     <span className="truncate">
-                      {queued.title} — {queued.artist}
+                      {queued.artist === '' ? queued.title : `${queued.artist} — ${queued.title}`}
                     </span>
                     <span className="ml-3 shrink-0 tabular-nums text-zinc-500">
-                      {queued.originalBpm} bpm
+                      {queued.originalBpm === null ? '—' : `${queued.originalBpm} bpm`}
                     </span>
                   </button>
                 </li>
