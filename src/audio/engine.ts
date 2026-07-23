@@ -1,8 +1,14 @@
 import SignalsmithStretch, { type StretchNode } from 'signalsmith-stretch';
 import { guess } from 'web-audio-beat-detector';
-import type { TrackManifestEntry } from '../tracks';
 
-export type LoadedTrack = TrackManifestEntry & {
+export type TrackSource = {
+  key: string;
+  title: string;
+  artist: string;
+  url: string;
+};
+
+export type LoadedTrack = Omit<TrackSource, 'url'> & {
   buffer: AudioBuffer;
   originalBpm: number;
   durationSeconds: number;
@@ -13,15 +19,22 @@ const TEMPO_SETTINGS = { minTempo: 90, maxTempo: 180 };
 
 export async function loadTrack(
   context: AudioContext,
-  entry: TrackManifestEntry,
+  source: TrackSource,
 ): Promise<LoadedTrack> {
-  const response = await fetch(entry.url);
+  const response = await fetch(source.url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch ${entry.url}: ${response.status}`);
+    throw new Error(`Failed to fetch audio for ${source.key}: ${response.status}`);
   }
   const buffer = await context.decodeAudioData(await response.arrayBuffer());
   const { bpm } = await guess(buffer, TEMPO_SETTINGS);
-  return { ...entry, buffer, originalBpm: bpm, durationSeconds: buffer.duration };
+  return {
+    key: source.key,
+    title: source.title,
+    artist: source.artist,
+    buffer,
+    originalBpm: bpm,
+    durationSeconds: buffer.duration,
+  };
 }
 
 export class TempoEngine {

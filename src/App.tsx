@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { cn } from './lib/cn';
 import {
   DEFAULT_TARGET_BPM,
@@ -56,9 +56,53 @@ function TempoBox({ value, label, sublabel, isActive, onSelect, children }: Temp
   );
 }
 
+type PassphraseGateProps = {
+  onSubmit: (passphrase: string) => void;
+};
+
+function PassphraseGate({ onSubmit }: PassphraseGateProps) {
+  const [value, setValue] = useState('');
+  return (
+    <main className="flex min-h-svh items-center justify-center bg-zinc-950 p-6 text-zinc-100">
+      <form
+        className="flex w-full flex-col gap-4 sm:w-90"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (value.length > 0) {
+            onSubmit(value);
+          }
+        }}
+      >
+        <h1 className="text-center text-xl font-semibold">Tempo Player</h1>
+        <p className="text-center text-sm text-zinc-400">Enter the passphrase to unlock your library.</p>
+        <input
+          type="password"
+          value={value}
+          autoFocus
+          onChange={(event) => {
+            setValue(event.target.value);
+          }}
+          className="rounded-lg bg-zinc-800 px-4 py-3 outline-none ring-emerald-400 focus:ring-2"
+          aria-label="Passphrase"
+        />
+        <button
+          type="submit"
+          className="rounded-lg bg-emerald-400 py-3 font-semibold text-zinc-950 hover:bg-emerald-300"
+        >
+          Unlock
+        </button>
+      </form>
+    </main>
+  );
+}
+
 function App() {
   const player = usePlayer();
   const track = player.tracks[player.trackIndex];
+
+  if (player.needsPassphrase) {
+    return <PassphraseGate onSubmit={player.submitPassphrase} />;
+  }
 
   if (player.loadError) {
     return (
@@ -214,7 +258,7 @@ function App() {
             {player.tracks.map((queued, index) => {
               const isActive = index === player.trackIndex;
               return (
-                <li key={queued.id}>
+                <li key={queued.key}>
                   <button
                     type="button"
                     className={cn(

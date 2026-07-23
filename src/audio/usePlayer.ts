@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { TRACK_MANIFEST } from '../tracks';
-import { TempoEngine, loadTrack, type LoadedTrack } from './engine';
+import { AuthRequiredError, fetchTrackUrl, fetchTracks, storePassphrase } from '../api/client';
+import { TempoEngine, loadTrack, type LoadedTrack, type TrackSource } from './engine';
 
 export const DEFAULT_TARGET_BPM = 120;
 export const MIN_TARGET_BPM = 60;
@@ -11,22 +11,44 @@ type PlayerSingleton = {
   tracks: LoadedTrack[];
 };
 
+// Listing titles look like "Artist - Track Title"; fall back to no artist.
+function sourceFromListing(key: string, listingTitle: string, url: string): TrackSource {
+  const separatorIndex = listingTitle.indexOf(' - ');
+  if (separatorIndex === -1) {
+    return { key, title: listingTitle, artist: '', url };
+  }
+  return {
+    key,
+    title: listingTitle.slice(separatorIndex + 3),
+    artist: listingTitle.slice(0, separatorIndex),
+    url,
+  };
+}
+
 // Module-level so React StrictMode's dev double-mount doesn't decode everything twice.
 let singletonPromise: Promise<PlayerSingleton> | null = null;
 
 function initPlayer(): Promise<PlayerSingleton> {
   if (!singletonPromise) {
     singletonPromise = (async () => {
+      const listing = await fetchTracks();
       const context = new AudioContext();
       const tracks = await Promise.all(
-        TRACK_MANIFEST.map((entry) => loadTrack(context, entry)),
+        listing.map(async (remote) => {
+          const url = await fetchTrackUrl(remote.key);
+          return loadTrack(context, sourceFromListing(remote.key, remote.title, url));
+        }),
       );
       const engine = new TempoEngine(context);
       if (import.meta.env.DEV) {
         (window as unknown as { __tempoEngine?: TempoEngine }).__tempoEngine = engine;
       }
       return { engine, tracks };
-    })();
+    })().catch((error: unknown) => {
+      // Allow a retry (e.g. after the user enters the passphrase).
+      singletonPromise = null;
+      throw error;
+    });
   }
   return singletonPromise;
 }
@@ -34,6 +56,8 @@ function initPlayer(): Promise<PlayerSingleton> {
 export type PlayerState = {
   isLoading: boolean;
   loadError: string | null;
+  needsPassphrase: boolean;
+  submitPassphrase: (passphrase: string) => void;
   tracks: LoadedTrack[];
   trackIndex: number;
   isPlaying: boolean;
@@ -57,6 +81,8 @@ export function usePlayer(): PlayerState {
   const engineRef = useRef<TempoEngine | null>(null);
   const [tracks, setTracks] = useState<LoadedTrack[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [needsPassphrase, setNeedsPassphrase] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [trackIndex, setTrackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [positionSeconds, setPositionSeconds] = useState(0);
@@ -76,14 +102,19 @@ export function usePlayer(): PlayerState {
         setTracks(loaded);
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
+        if (cancelled) {
+          return;
+        }
+        if (error instanceof AuthRequiredError) {
+          setNeedsPassphrase(true);
+        } else {
           setLoadError(error instanceof Error ? error.message : String(error));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -188,9 +219,18 @@ export function usePlayer(): PlayerState {
     }
   }
 
+  function submitPassphrase(passphrase: string) {
+    storePassphrase(passphrase);
+    setNeedsPassphrase(false);
+    setLoadError(null);
+    setLoadAttempt((attempt) => attempt + 1);
+  }
+
   return {
-    isLoading: tracks.length === 0 && loadError === null,
+    isLoading: tracks.length === 0 && loadError === null && !needsPassphrase,
     loadError,
+    needsPassphrase,
+    submitPassphrase,
     tracks,
     trackIndex,
     isPlaying,
