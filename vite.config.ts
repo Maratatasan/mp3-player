@@ -10,6 +10,7 @@ function apiDevPlugin(): Plugin {
   const routes: Record<string, string> = {
     '/tracks': '/api/tracks.ts',
     '/track-url': '/api/track-url.ts',
+    '/sync': '/api/sync.ts',
   };
   return {
     name: 'api-dev',

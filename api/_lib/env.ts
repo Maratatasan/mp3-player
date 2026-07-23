@@ -10,6 +10,10 @@ export const env = createEnv({
     R2_SECRET_ACCESS_KEY: z.string().min(1),
     R2_BUCKET_NAME: z.string().min(1),
     APP_PASSPHRASE: z.string().min(8),
+    // Optional: enables the in-app "Sync" button (fine-grained PAT with
+    // Actions read+write on the repo). Without it /api/sync returns 501.
+    GITHUB_PAT: z.string().min(1).optional(),
+    GITHUB_REPO: z.string().default('Maratatasan/mp3-player'),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

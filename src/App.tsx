@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { triggerLibrarySync } from './api/client';
 import { cn } from './lib/cn';
 import {
   DEFAULT_TARGET_BPM,
@@ -99,7 +100,31 @@ function PassphraseGate({ onSubmit }: PassphraseGateProps) {
 function App() {
   const player = usePlayer();
   const activeRowRef = useRef<HTMLLIElement | null>(null);
+  const [libraryStatus, setLibraryStatus] = useState('');
   const entry = player.queue[player.trackIndex];
+
+  function handleRefresh() {
+    setLibraryStatus('refreshing…');
+    player
+      .refreshLibrary()
+      .then((added) => {
+        setLibraryStatus(added > 0 ? `${added} new track${added === 1 ? '' : 's'}` : 'no new tracks');
+      })
+      .catch((error: unknown) => {
+        setLibraryStatus(error instanceof Error ? error.message : 'refresh failed');
+      });
+  }
+
+  function handleSync() {
+    setLibraryStatus('starting cloud sync…');
+    triggerLibrarySync()
+      .then(() => {
+        setLibraryStatus('sync started — new tracks land in a few minutes, then hit refresh');
+      })
+      .catch((error: unknown) => {
+        setLibraryStatus(error instanceof Error ? error.message : 'sync failed');
+      });
+  }
 
   useEffect(() => {
     activeRowRef.current?.scrollIntoView({ block: 'nearest' });
@@ -264,9 +289,30 @@ function App() {
         </section>
 
         <section aria-label="Queue" className="min-h-0 flex-1 overflow-y-auto text-left">
-          <h2 className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
-            Queue · {player.queue.length} tracks
-          </h2>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-xs uppercase tracking-widest text-zinc-500">
+              Queue · {player.queue.length} tracks
+            </h2>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+                onClick={handleRefresh}
+              >
+                ↻ refresh
+              </button>
+              <button
+                type="button"
+                className="rounded-full bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+                onClick={handleSync}
+              >
+                ☁ sync
+              </button>
+            </div>
+          </div>
+          {libraryStatus !== '' && (
+            <p className="mb-2 text-xs text-zinc-500">{libraryStatus}</p>
+          )}
           <ul className="flex flex-col gap-1">
             {player.queue.map((queued, index) => {
               const isActive = index === player.trackIndex;

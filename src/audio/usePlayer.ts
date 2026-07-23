@@ -49,17 +49,21 @@ type PlayerSingleton = {
 // Module-level so React StrictMode's dev double-mount doesn't init twice.
 let singletonPromise: Promise<PlayerSingleton> | null = null;
 
+async function buildEntries(): Promise<QueueEntry[]> {
+  const listing = await fetchTracks();
+  return Promise.all(
+    listing.map(async (remote) => {
+      const entry = entryFromListing(remote.key, remote.title);
+      const cachedBpm = await getCachedBpm(remote.key);
+      return cachedBpm === undefined ? entry : { ...entry, originalBpm: cachedBpm };
+    }),
+  );
+}
+
 function initPlayer(): Promise<PlayerSingleton> {
   if (!singletonPromise) {
     singletonPromise = (async () => {
-      const listing = await fetchTracks();
-      const entries = await Promise.all(
-        listing.map(async (remote) => {
-          const entry = entryFromListing(remote.key, remote.title);
-          const cachedBpm = await getCachedBpm(remote.key);
-          return cachedBpm === undefined ? entry : { ...entry, originalBpm: cachedBpm };
-        }),
-      );
+      const entries = await buildEntries();
       const context = new AudioContext();
       const engine = new TempoEngine(context);
       if (import.meta.env.DEV) {
@@ -130,6 +134,7 @@ export type PlayerState = {
   seek: (seconds: number) => void;
   setTargetBpm: (bpm: number) => void;
   toggleOriginalTempo: () => void;
+  refreshLibrary: () => Promise<number>;
 };
 
 function rateFor(originalBpm: number, targetBpm: number, isOriginalTempo: boolean): number {
@@ -341,6 +346,19 @@ export function usePlayer(): PlayerState {
     }
   }
 
+  // Re-fetches the bucket listing (e.g. after a cloud sync) without touching
+  // playback. Returns how many tracks were added. Keeps the current track
+  // selected by key.
+  async function refreshLibrary(): Promise<number> {
+    const entries = await buildEntries();
+    const currentKey = queue[trackIndex]?.key;
+    const added = entries.length - queue.length;
+    setQueue(entries);
+    const newIndex = entries.findIndex((queued) => queued.key === currentKey);
+    setTrackIndex(newIndex === -1 ? 0 : newIndex);
+    return added;
+  }
+
   function submitPassphrase(passphrase: string) {
     storePassphrase(passphrase);
     setNeedsPassphrase(false);
@@ -368,5 +386,6 @@ export function usePlayer(): PlayerState {
     seek,
     setTargetBpm,
     toggleOriginalTempo,
+    refreshLibrary,
   };
 }
