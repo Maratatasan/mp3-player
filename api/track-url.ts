@@ -1,9 +1,9 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requirePassphrase } from './_lib/auth';
-import { env } from './_lib/env';
-import { r2 } from './_lib/r2';
+import { requirePassphrase } from './_lib/auth.js';
+import { env } from './_lib/env.js';
+import { r2 } from './_lib/r2.js';
 
 const URL_TTL_SECONDS = 60 * 15;
 

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { env } from './env';
+import { env } from './env.js';
 
 // Constant-shape check of the shared passphrase sent as a bearer token.
 export function requirePassphrase(request: VercelRequest, response: VercelResponse): boolean {

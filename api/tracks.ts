@@ -1,8 +1,8 @@
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requirePassphrase } from './_lib/auth';
-import { env } from './_lib/env';
-import { r2 } from './_lib/r2';
+import { requirePassphrase } from './_lib/auth.js';
+import { env } from './_lib/env.js';
+import { r2 } from './_lib/r2.js';
 
 export type TrackListing = {
   key: string;

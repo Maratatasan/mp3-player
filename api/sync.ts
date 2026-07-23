@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requirePassphrase } from './_lib/auth';
-import { env } from './_lib/env';
+import { requirePassphrase } from './_lib/auth.js';
+import { env } from './_lib/env.js';
 
 const GITHUB_HEADERS = (pat: string) => ({
   Authorization: `Bearer ${pat}`,
