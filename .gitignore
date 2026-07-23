@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.vercel
+
+# local dev audio files — real library lives in R2
+public/audio/
 
 # Editor directories and files
 .vscode/*
