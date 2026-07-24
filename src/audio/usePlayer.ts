@@ -282,6 +282,7 @@ export function usePlayer(): PlayerState {
         const durationSeconds = await engine.setTrack(
           data.bytes,
           rateFor(data.originalBpm, targetBpm, isOriginalTempo),
+          data.key,
         );
         if (cancelled) {
           return;
@@ -343,6 +344,7 @@ export function usePlayer(): PlayerState {
           void engineRef.current?.prepare?.(
             track.bytes,
             rateFor(track.originalBpm, targetBpm, isOriginalTempo),
+            track.key,
           );
         }
       })
