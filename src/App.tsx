@@ -168,7 +168,7 @@ function App() {
               setIsMenuOpen((open) => !open);
             }}
             className={cn(
-              'absolute right-0 top-0 flex h-10 w-10 items-center justify-center rounded-full text-lg',
+              'absolute right-0 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-lg',
               isMenuOpen
                 ? 'bg-emerald-400/20 text-emerald-400 ring-1 ring-emerald-400'
                 : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700',
