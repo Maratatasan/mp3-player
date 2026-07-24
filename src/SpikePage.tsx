@@ -54,6 +54,130 @@ function encodeWav(buffer: AudioBuffer): Blob {
   return new Blob([arrayBuffer], { type: 'audio/wav' });
 }
 
+type CodecResult = {
+  hasAudioEncoder: boolean;
+  aacSupported: boolean;
+  opusSupported: boolean;
+  codecUsed: string | null;
+  encodeMs: number;
+  encodedKB: number;
+  decodeMs: number;
+  roundTripOk: boolean;
+  error?: string;
+};
+
+// Can the browser's NATIVE encoder compress rendered audio (for the render
+// cache), and decode it back? Tests WebCodecs AudioEncoder/AudioDecoder.
+async function runCodecSpike(): Promise<CodecResult> {
+  const result: CodecResult = {
+    hasAudioEncoder: typeof AudioEncoder !== 'undefined',
+    aacSupported: false,
+    opusSupported: false,
+    codecUsed: null,
+    encodeMs: 0,
+    encodedKB: 0,
+    decodeMs: 0,
+    roundTripOk: false,
+  };
+  try {
+    if (!result.hasAudioEncoder) {
+      return result;
+    }
+    const aac = await AudioEncoder.isConfigSupported({
+      codec: 'mp4a.40.2',
+      sampleRate: 44100,
+      numberOfChannels: 2,
+      bitrate: 160_000,
+    });
+    const opus = await AudioEncoder.isConfigSupported({
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 2,
+      bitrate: 160_000,
+    });
+    result.aacSupported = aac.supported === true;
+    result.opusSupported = opus.supported === true;
+    if (!result.aacSupported && !result.opusSupported) {
+      return result;
+    }
+    const codec = result.aacSupported ? 'mp4a.40.2' : 'opus';
+    const sampleRate = result.aacSupported ? 44100 : 48000;
+    result.codecUsed = codec;
+
+    // 30s of real audio, resampled to the codec's rate.
+    const bytes = await loadFirstTrackBytes();
+    const decodeContext = new OfflineAudioContext(2, 1, sampleRate);
+    const source = await decodeContext.decodeAudioData(bytes.slice(0));
+    const resampler = new OfflineAudioContext(2, RENDER_SECONDS * sampleRate, sampleRate);
+    const node = resampler.createBufferSource();
+    node.buffer = source;
+    node.connect(resampler.destination);
+    node.start();
+    const pcm = await resampler.startRendering();
+
+    const chunks: EncodedAudioChunk[] = [];
+    let decoderConfig: AudioDecoderConfig | null = null;
+    const encoder = new AudioEncoder({
+      output: (chunk, metadata) => {
+        chunks.push(chunk);
+        if (metadata?.decoderConfig) {
+          decoderConfig = metadata.decoderConfig;
+        }
+      },
+      error: () => {},
+    });
+    encoder.configure({ codec, sampleRate, numberOfChannels: 2, bitrate: 160_000 });
+
+    const encodeStart = performance.now();
+    const framesPerPush = sampleRate;
+    for (let offset = 0; offset < pcm.length; offset += framesPerPush) {
+      const frames = Math.min(framesPerPush, pcm.length - offset);
+      const planar = new Float32Array(frames * 2);
+      planar.set(pcm.getChannelData(0).subarray(offset, offset + frames), 0);
+      planar.set(pcm.getChannelData(1).subarray(offset, offset + frames), frames);
+      encoder.encode(
+        new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: frames,
+          numberOfChannels: 2,
+          timestamp: (offset / sampleRate) * 1_000_000,
+          data: planar,
+        }),
+      );
+    }
+    await encoder.flush();
+    result.encodeMs = Math.round(performance.now() - encodeStart);
+    result.encodedKB = Math.round(
+      chunks.reduce((total, chunk) => total + chunk.byteLength, 0) / 1024,
+    );
+
+    // Round trip: a cache read must decode these chunks back to PCM.
+    let decodedFrames = 0;
+    const decoder = new AudioDecoder({
+      output: (data) => {
+        decodedFrames += data.numberOfFrames;
+        data.close();
+      },
+      error: () => {},
+    });
+    decoder.configure(
+      decoderConfig ?? { codec, sampleRate, numberOfChannels: 2 },
+    );
+    const decodeStart = performance.now();
+    for (const chunk of chunks) {
+      decoder.decode(chunk);
+    }
+    await decoder.flush();
+    result.decodeMs = Math.round(performance.now() - decodeStart);
+    result.roundTripOk = decodedFrames >= pcm.length * 0.95;
+    return result;
+  } catch (error) {
+    result.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    return result;
+  }
+}
+
 async function loadFirstTrackBytes(): Promise<ArrayBuffer> {
   const listing = await fetchTracks();
   if (listing.length === 0) {
@@ -123,7 +247,20 @@ async function runSpike(): Promise<{ result: SpikeResult; wavUrl: string | null 
 export function SpikePage() {
   const [status, setStatus] = useState('idle');
   const [result, setResult] = useState<SpikeResult | null>(null);
+  const [codecResult, setCodecResult] = useState<CodecResult | null>(null);
   const [wavUrl, setWavUrl] = useState<string | null>(null);
+
+  function startCodec() {
+    setStatus('running codec spike — encode + decode 30s…');
+    runCodecSpike()
+      .then((outcome) => {
+        setCodecResult(outcome);
+        setStatus('done');
+      })
+      .catch((error: unknown) => {
+        setStatus(error instanceof Error ? error.message : 'failed');
+      });
+  }
 
   function start() {
     setStatus('running — decoding + rendering 30s at 0.94×…');
@@ -145,17 +282,31 @@ export function SpikePage() {
         Renders 30s of the first library track through Signalsmith in an
         OfflineAudioContext, then lets you play the result.
       </p>
-      <button
-        type="button"
-        onClick={start}
-        className="rounded-lg bg-emerald-400 px-6 py-3 font-semibold text-zinc-950"
-      >
-        Run spike
-      </button>
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={start}
+          className="rounded-lg bg-emerald-400 px-6 py-3 font-semibold text-zinc-950"
+        >
+          Run render spike
+        </button>
+        <button
+          type="button"
+          onClick={startCodec}
+          className="rounded-lg bg-sky-400 px-6 py-3 font-semibold text-zinc-950"
+        >
+          Run codec spike
+        </button>
+      </div>
       <p className="text-sm text-zinc-400">{status}</p>
       {result && (
         <pre className="rounded-lg bg-zinc-900 p-4 text-left text-sm">
           {JSON.stringify(result, null, 2)}
+        </pre>
+      )}
+      {codecResult && (
+        <pre className="rounded-lg bg-zinc-900 p-4 text-left text-sm">
+          {JSON.stringify(codecResult, null, 2)}
         </pre>
       )}
       {wavUrl && (
