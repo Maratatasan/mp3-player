@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLibrarySync } from './hooks/useLibrarySync';
+import { useWakeLock } from './hooks/useWakeLock';
 import { cn } from './lib/cn';
 import {
   DEFAULT_TARGET_BPM,
@@ -120,6 +121,7 @@ function App() {
   }
 
   const sync = useLibrarySync(handleRefresh);
+  const wakeLock = useWakeLock();
 
   useEffect(() => {
     activeRowRef.current?.scrollIntoView({ block: 'nearest' });
@@ -306,6 +308,21 @@ function App() {
             <h2 className="text-xs uppercase tracking-widest text-zinc-500">
               Queue · {player.queue.length} tracks
             </h2>
+            {wakeLock.isSupported && (
+              <button
+                type="button"
+                aria-pressed={wakeLock.isActive}
+                onClick={wakeLock.toggle}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-xs',
+                  wakeLock.isActive
+                    ? 'bg-emerald-400/20 text-emerald-400 ring-1 ring-emerald-400'
+                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700',
+                )}
+              >
+                {wakeLock.isActive ? '☀ screen stays on' : '☀ keep screen on'}
+              </button>
+            )}
             {/* Hidden for now: cloud sync fails from CI — YouTube bot-checks
                 GitHub's datacenter IPs, so the workflow can't download new
                 tracks. Re-enable once sync runs somewhere with a residential

@@ -1,57 +1,30 @@
 import SignalsmithStretch, { type StretchNode } from 'signalsmith-stretch';
-import { guess } from 'web-audio-beat-detector';
+import type { PlaybackEngine } from './playbackEngine';
 
-export type TrackSource = {
-  key: string;
-  title: string;
-  artist: string;
-  url: string;
-};
-
-export type LoadedTrack = Omit<TrackSource, 'url'> & {
-  buffer: AudioBuffer;
-  originalBpm: number;
-  durationSeconds: number;
-};
-
-// Steady DJ-style material sits well inside the detector's default 90-180 window.
-const TEMPO_SETTINGS = { minTempo: 90, maxTempo: 180 };
-
-// decodeAudioData detaches the ArrayBuffer it's given — callers that need to
-// keep the bytes (e.g. for caching) must pass a copy.
-export async function prepareTrack(
-  context: AudioContext,
-  meta: Omit<TrackSource, 'url'>,
-  bytes: ArrayBuffer,
-  knownBpm: number | null,
-): Promise<LoadedTrack> {
-  const buffer = await context.decodeAudioData(bytes);
-  const bpm = knownBpm ?? (await guess(buffer, TEMPO_SETTINGS)).bpm;
-  return {
-    key: meta.key,
-    title: meta.title,
-    artist: meta.artist,
-    buffer,
-    originalBpm: bpm,
-    durationSeconds: buffer.duration,
-  };
-}
-
-export class TempoEngine {
+// Signalsmith-stretch playback: highest quality tempo change. Output goes
+// straight to the context destination (single clock — never route it through
+// a MediaStream element, that causes pitch wobble). A silent looping element
+// runs alongside so the OS treats the tab as media playback (background
+// survival on Android + a Media Session anchor). Not used on iOS, which
+// suspends Web Audio on screen lock.
+export class WorkletEngine implements PlaybackEngine {
   private context: AudioContext;
   private stretch: StretchNode | null = null;
   private currentRate = 1;
+  private durationSeconds = 0;
+  private isActive = false;
+  private onEnded: (() => void) | null = null;
+  private endWatcher: number | null = null;
   private keepAliveElement: HTMLAudioElement;
 
   constructor(context: AudioContext) {
     this.context = context;
-    // Music plays straight to the context destination (single clock, no
-    // resampling — routing it through an element caused audible pitch
-    // wobble). This silent looping element runs alongside purely so the OS
-    // treats the tab as media playback: audio survives screen lock and the
-    // Media Session card gets an anchor.
     this.keepAliveElement = new Audio('/silence.mp3');
     this.keepAliveElement.loop = true;
+  }
+
+  setOnEnded(callback: () => void): void {
+    this.onEnded = callback;
   }
 
   private async ensureStretch(): Promise<StretchNode> {
@@ -65,25 +38,31 @@ export class TempoEngine {
     return stretch;
   }
 
-  async setTrack(track: LoadedTrack, rate: number): Promise<void> {
+  async setTrack(bytes: ArrayBuffer, rate: number): Promise<number> {
+    // decodeAudioData detaches its input — callers keep the original bytes.
+    const buffer = await this.context.decodeAudioData(bytes.slice(0));
     const stretch = await this.ensureStretch();
+    this.stopEndWatcher();
+    this.isActive = false;
+    this.keepAliveElement.pause();
     await stretch.stop();
     await stretch.dropBuffers();
     const channels: Float32Array[] = [];
-    for (let channel = 0; channel < track.buffer.numberOfChannels; channel += 1) {
-      channels.push(track.buffer.getChannelData(channel));
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      channels.push(buffer.getChannelData(channel));
     }
     await stretch.addBuffers(channels);
     this.currentRate = rate;
+    this.durationSeconds = buffer.duration;
     await stretch.schedule({ input: 0, rate, active: false });
+    return buffer.duration;
   }
 
   async play(fromSeconds?: number): Promise<void> {
-    // Kick the element synchronously so the call stays inside the user
-    // gesture that (first) triggered playback; later programmatic plays are
-    // allowed because the element was gesture-activated once.
+    // Kick the keep-alive synchronously so it stays inside the user gesture
+    // that (first) triggered playback.
     this.keepAliveElement.play().catch(() => {
-      // Keep-alive rejection only affects lock-screen survival, not audio.
+      // Keep-alive rejection only affects background survival, not audio.
     });
     const stretch = await this.ensureStretch();
     if (this.context.state === 'suspended') {
@@ -94,26 +73,46 @@ export class TempoEngine {
       rate: this.currentRate,
       ...(fromSeconds === undefined ? {} : { input: fromSeconds }),
     });
+    this.isActive = true;
+    this.startEndWatcher();
   }
 
-  async pause(): Promise<void> {
-    const stretch = await this.ensureStretch();
-    await stretch.schedule({ active: false });
+  pause(): void {
+    this.isActive = false;
+    this.stopEndWatcher();
+    void this.stretch?.schedule({ active: false });
     this.keepAliveElement.pause();
   }
 
-  async seek(toSeconds: number): Promise<void> {
-    const stretch = await this.ensureStretch();
-    await stretch.schedule({ input: toSeconds, rate: this.currentRate });
+  seek(toSeconds: number): void {
+    void this.stretch?.schedule({ input: toSeconds, rate: this.currentRate });
   }
 
-  async setRate(rate: number): Promise<void> {
+  setRate(rate: number): void {
     this.currentRate = rate;
-    const stretch = await this.ensureStretch();
-    await stretch.schedule({ rate });
+    void this.stretch?.schedule({ rate });
   }
 
   positionSeconds(): number {
     return this.stretch?.inputTime ?? 0;
+  }
+
+  // The worklet has no `ended` event — watch the input position instead.
+  private startEndWatcher(): void {
+    this.stopEndWatcher();
+    this.endWatcher = window.setInterval(() => {
+      if (this.isActive && this.durationSeconds > 0 && this.positionSeconds() >= this.durationSeconds) {
+        this.isActive = false;
+        this.stopEndWatcher();
+        this.onEnded?.();
+      }
+    }, 200);
+  }
+
+  private stopEndWatcher(): void {
+    if (this.endWatcher !== null) {
+      clearInterval(this.endWatcher);
+      this.endWatcher = null;
+    }
   }
 }

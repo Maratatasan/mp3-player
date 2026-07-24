@@ -101,9 +101,15 @@ Supporting files:
 
 _To be written — next lesson (see the learning workspace in `~/localCode/agent-misc/mp3-player-learning/`)._
 
+## Deployed
+
+Live at https://mp3-player-rosy-two.vercel.app (Vercel, personal account; every push to `main` auto-deploys). Env vars are set in the Vercel project settings — same five as `.env`.
+
+Lock-screen playback works: music goes straight to the Web Audio destination while a silent looping element (`public/silence.mp3`) holds media-playback status, and the Media Session API provides the lock-screen card (metadata, controls, tempo-aware progress via `setPositionState`). Don't route the music itself through a MediaStream + element — two clocks, audible pitch wobble.
+
 ## Not done yet
 
-- Vercel deploy (repo not connected; env vars need setting in the Vercel project)
-- Lock-screen playback + Media Session API (needed for phone use)
+- PWA manifest (home-screen install, offline shell)
 - Tap-tempo correction for wrongly-detected BPMs
 - Nicer track metadata (currently parsed from filenames)
+- Cloud sync from the app (shelved — see `SHOW_LIBRARY_BUTTONS` in App.tsx)

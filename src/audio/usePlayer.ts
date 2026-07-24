@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { AuthRequiredError, fetchTrackUrl, fetchTracks, storePassphrase } from '../api/client';
-import { TempoEngine, prepareTrack, type LoadedTrack } from './engine';
+import { ElementEngine, detectBpm, type LoadedTrack, type TrackData } from './elementEngine';
+import { WorkletEngine } from './engine';
+import type { PlaybackEngine } from './playbackEngine';
 import { cacheBpm, cacheBytes, getCachedBpm, getCachedBytes } from './trackCache';
+
+export type { LoadedTrack } from './elementEngine';
+
+// iPadOS 13+ reports as Mac; the touch-points check catches it.
+function isIOS(): boolean {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes('Mac') && navigator.maxTouchPoints > 1)
+  );
+}
 
 export const DEFAULT_TARGET_BPM = 120;
 export const MIN_TARGET_BPM = 60;
@@ -75,7 +87,7 @@ function entryFromListing(key: string, listingTitle: string): QueueEntry {
 }
 
 type PlayerSingleton = {
-  engine: TempoEngine;
+  engine: PlaybackEngine;
   context: AudioContext;
   entries: QueueEntry[];
 };
@@ -99,10 +111,12 @@ function initPlayer(): Promise<PlayerSingleton> {
   if (!singletonPromise) {
     singletonPromise = (async () => {
       const entries = await buildEntries();
+      // Used for BPM detection everywhere; also for playback via the worklet
+      // engine outside iOS.
       const context = new AudioContext();
-      const engine = new TempoEngine(context);
+      const engine: PlaybackEngine = isIOS() ? new ElementEngine() : new WorkletEngine(context);
       if (import.meta.env.DEV) {
-        (window as unknown as { __tempoEngine?: TempoEngine }).__tempoEngine = engine;
+        (window as unknown as { __tempoEngine?: PlaybackEngine }).__tempoEngine = engine;
       }
       return { engine, context, entries };
     })().catch((error: unknown) => {
@@ -114,11 +128,12 @@ function initPlayer(): Promise<PlayerSingleton> {
   return singletonPromise;
 }
 
-// One in-flight/settled load per track key; decoded tracks stay in memory
-// for the session, encoded bytes + BPM persist in IndexedDB across visits.
-const loadedTracks = new Map<string, Promise<LoadedTrack>>();
+// One in-flight/settled load per track key; encoded bytes stay in memory for
+// the session, and bytes + BPM persist in IndexedDB across visits. Tracks
+// with a cached BPM skip audio decoding entirely.
+const loadedTracks = new Map<string, Promise<TrackData>>();
 
-function ensureLoaded(context: AudioContext, entry: QueueEntry): Promise<LoadedTrack> {
+function ensureLoaded(context: AudioContext, entry: QueueEntry): Promise<TrackData> {
   const existing = loadedTracks.get(entry.key);
   if (existing) {
     return existing;
@@ -134,13 +149,19 @@ function ensureLoaded(context: AudioContext, entry: QueueEntry): Promise<LoadedT
       bytes = await response.arrayBuffer();
       await cacheBytes(entry.key, bytes);
     }
-    const knownBpm = (await getCachedBpm(entry.key)) ?? null;
-    // decodeAudioData detaches its input — hand it a copy, keep the original.
-    const track = await prepareTrack(context, entry, bytes.slice(0), knownBpm);
-    if (knownBpm === null) {
-      await cacheBpm(entry.key, track.originalBpm);
+    let bpm = await getCachedBpm(entry.key);
+    if (bpm === undefined) {
+      // decodeAudioData detaches its input — hand it a copy, keep the original.
+      bpm = await detectBpm(context, bytes.slice(0));
+      await cacheBpm(entry.key, bpm);
     }
-    return track;
+    return {
+      key: entry.key,
+      title: entry.title,
+      artist: entry.artist,
+      bytes,
+      originalBpm: bpm,
+    };
   })().catch((error: unknown) => {
     loadedTracks.delete(entry.key);
     throw error;
@@ -179,7 +200,7 @@ function rateFor(originalBpm: number, targetBpm: number, isOriginalTempo: boolea
 }
 
 export function usePlayer(): PlayerState {
-  const engineRef = useRef<TempoEngine | null>(null);
+  const engineRef = useRef<PlaybackEngine | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -244,20 +265,29 @@ export function usePlayer(): PlayerState {
     setIsTrackLoading(true);
     localStorage.setItem(LAST_TRACK_STORAGE_KEY, entry.key);
     ensureLoaded(context, entry)
-      .then(async (track) => {
+      .then(async (data) => {
         if (cancelled) {
           return;
         }
-        await engine.setTrack(track, rateFor(track.originalBpm, targetBpm, isOriginalTempo));
+        const durationSeconds = await engine.setTrack(
+          data.bytes,
+          rateFor(data.originalBpm, targetBpm, isOriginalTempo),
+        );
         if (cancelled) {
           return;
         }
-        setCurrentTrack(track);
+        setCurrentTrack({
+          key: data.key,
+          title: data.title,
+          artist: data.artist,
+          originalBpm: data.originalBpm,
+          durationSeconds,
+        });
         setIsTrackLoading(false);
         setQueue((previous) =>
           previous.map((queued) =>
-            queued.key === track.key && queued.originalBpm === null
-              ? { ...queued, originalBpm: track.originalBpm }
+            queued.key === data.key && queued.originalBpm === null
+              ? { ...queued, originalBpm: data.originalBpm }
               : queued,
           ),
         );
@@ -338,9 +368,8 @@ export function usePlayer(): PlayerState {
         seek(details.seekTime);
       }
     });
-    // Position/duration/rate snapshot: reported in track-seconds; the OS
-    // advances the bar itself using playbackRate between our updates (this
-    // effect re-runs alongside the 200ms position poll while playing).
+    // Needed for the worklet engine (no media element for the OS to read);
+    // on iOS the element reports natively and these values agree with it.
     try {
       navigator.mediaSession.setPositionState({
         duration: currentTrack.durationSeconds,
@@ -353,29 +382,30 @@ export function usePlayer(): PlayerState {
     // Re-registering on each relevant state change keeps closures fresh.
   });
 
+  // Auto-advance when the element finishes a track.
+  useEffect(() => {
+    engineRef.current?.setOnEnded(() => {
+      setPositionSeconds(0);
+      goToTrack((trackIndex + 1) % queue.length);
+    });
+    // Re-registered every render so the closure stays fresh.
+  });
+
   useEffect(() => {
     if (!isPlaying || !currentTrack) {
       return;
     }
     const interval = setInterval(() => {
       const engine = engineRef.current;
-      if (!engine) {
-        return;
-      }
-      const position = engine.positionSeconds();
-      if (position >= currentTrack.durationSeconds) {
-        setPositionSeconds(0);
-        goToTrack((trackIndex + 1) % queue.length);
-      } else {
-        setPositionSeconds(position);
+      if (engine) {
+        // Track end is handled by the element's `ended` event, not here.
+        setPositionSeconds(engine.positionSeconds());
       }
     }, 200);
     return () => {
       clearInterval(interval);
     };
-    // goToTrack is stable per render; trackIndex is included via deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentTrack, queue.length, trackIndex]);
+  }, [isPlaying, currentTrack]);
 
   // Central navigation: records where we came from so back() can retrace.
   function goToTrack(index: number) {
