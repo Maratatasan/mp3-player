@@ -221,17 +221,34 @@ function App() {
               reset to {DEFAULT_TARGET_BPM}
             </button>
           </TempoBox>
-          <TempoBox
-            value={originalBpm ?? '—'}
-            label="original BPM"
-            sublabel={player.isOriginalTempo ? 'playing original tempo' : 'tap to play original'}
-            isActive={player.isOriginalTempo}
-            onSelect={() => {
-              if (!player.isOriginalTempo) {
-                player.toggleOriginalTempo();
-              }
-            }}
-          />
+          <div className="flex flex-1 flex-col gap-3">
+            <TempoBox
+              value={originalBpm ?? '—'}
+              label="original BPM"
+              sublabel={player.isOriginalTempo ? 'playing original tempo' : 'tap to play original'}
+              isActive={player.isOriginalTempo}
+              onSelect={() => {
+                if (!player.isOriginalTempo) {
+                  player.toggleOriginalTempo();
+                }
+              }}
+            />
+            {wakeLock.isSupported && (
+              <button
+                type="button"
+                aria-pressed={wakeLock.isActive}
+                onClick={wakeLock.toggle}
+                className={cn(
+                  'rounded-xl px-3 py-2.5 text-xs',
+                  wakeLock.isActive
+                    ? 'bg-emerald-400/20 text-emerald-400 ring-1 ring-emerald-400'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700',
+                )}
+              >
+                {wakeLock.isActive ? '☀ screen stays on' : '☀ keep screen on'}
+              </button>
+            )}
+          </div>
         </section>
 
         <section aria-label="Track position" className="flex items-center gap-3">
@@ -308,21 +325,6 @@ function App() {
             <h2 className="text-xs uppercase tracking-widest text-zinc-500">
               Queue · {player.queue.length} tracks
             </h2>
-            {wakeLock.isSupported && (
-              <button
-                type="button"
-                aria-pressed={wakeLock.isActive}
-                onClick={wakeLock.toggle}
-                className={cn(
-                  'rounded-full px-3 py-1.5 text-xs',
-                  wakeLock.isActive
-                    ? 'bg-emerald-400/20 text-emerald-400 ring-1 ring-emerald-400'
-                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700',
-                )}
-              >
-                {wakeLock.isActive ? '☀ screen stays on' : '☀ keep screen on'}
-              </button>
-            )}
             {/* Hidden for now: cloud sync fails from CI — YouTube bot-checks
                 GitHub's datacenter IPs, so the workflow can't download new
                 tracks. Re-enable once sync runs somewhere with a residential
