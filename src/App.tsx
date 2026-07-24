@@ -251,74 +251,7 @@ function App() {
           </div>
         </section>
 
-        <section aria-label="Track position" className="flex items-center gap-3">
-          <span className="min-w-10 text-sm tabular-nums text-zinc-400">
-            {formatTime(player.positionSeconds)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={track ? Math.floor(track.durationSeconds) : 1}
-            value={track ? Math.min(player.positionSeconds, track.durationSeconds) : 0}
-            disabled={!track}
-            onChange={(event) => {
-              player.seek(Number(event.target.value));
-            }}
-            className="h-11 w-full accent-emerald-400 disabled:opacity-40"
-            aria-label="Seek"
-          />
-          <span className="min-w-10 text-sm tabular-nums text-zinc-400">
-            {track ? formatTime(track.durationSeconds) : '–:––'}
-          </span>
-        </section>
 
-        <section
-          aria-label="Playback controls"
-          className="flex items-center justify-center gap-5"
-        >
-          <button
-            type="button"
-            aria-label="Shuffle queue"
-            title="Shuffle queue"
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
-            onClick={player.shuffleQueue}
-          >
-            🔀
-          </button>
-          <button
-            type="button"
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl hover:bg-zinc-700"
-            onClick={player.back}
-            aria-label="Previous track"
-          >
-            ⏮
-          </button>
-          <button
-            type="button"
-            className="flex h-18 w-18 items-center justify-center rounded-full bg-emerald-400 text-2xl text-zinc-950 hover:bg-emerald-300"
-            onClick={player.playPause}
-            aria-label={player.isPlaying ? 'Pause' : 'Play'}
-          >
-            {player.isPlaying ? '⏸' : '▶'}
-          </button>
-          <button
-            type="button"
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl hover:bg-zinc-700"
-            onClick={player.next}
-            aria-label="Next track"
-          >
-            ⏭
-          </button>
-          <button
-            type="button"
-            aria-label="Reset queue order"
-            title="Reset queue order"
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
-            onClick={player.resetQueueOrder}
-          >
-            ↺
-          </button>
-        </section>
 
         <section aria-label="Queue" className="min-h-0 flex-1 overflow-y-auto text-left">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -394,6 +327,75 @@ function App() {
               );
             })}
           </ul>
+        </section>
+
+        <section aria-label="Track position" className="-my-2 flex items-center gap-3">
+          <span className="min-w-10 text-sm tabular-nums text-zinc-400">
+            {formatTime(player.positionSeconds)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={track ? Math.floor(track.durationSeconds) : 1}
+            value={track ? Math.min(player.positionSeconds, track.durationSeconds) : 0}
+            disabled={!track}
+            onChange={(event) => {
+              player.seek(Number(event.target.value));
+            }}
+            className="h-11 w-full accent-emerald-400 disabled:opacity-40"
+            aria-label="Seek"
+          />
+          <span className="min-w-10 text-sm tabular-nums text-zinc-400">
+            {track ? formatTime(track.durationSeconds) : '–:––'}
+          </span>
+        </section>
+
+        <section
+          aria-label="Playback controls"
+          className="flex items-center justify-center gap-5"
+        >
+          <button
+            type="button"
+            aria-label="Shuffle queue"
+            title="Shuffle queue"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
+            onClick={player.shuffleQueue}
+          >
+            🔀
+          </button>
+          <button
+            type="button"
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl hover:bg-zinc-700"
+            onClick={player.back}
+            aria-label="Previous track"
+          >
+            ⏮
+          </button>
+          <button
+            type="button"
+            className="flex h-18 w-18 items-center justify-center rounded-full bg-emerald-400 text-2xl text-zinc-950 hover:bg-emerald-300"
+            onClick={player.playPause}
+            aria-label={player.isPlaying ? 'Pause' : 'Play'}
+          >
+            {player.isPlaying ? '⏸' : '▶'}
+          </button>
+          <button
+            type="button"
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800 text-xl hover:bg-zinc-700"
+            onClick={player.next}
+            aria-label="Next track"
+          >
+            ⏭
+          </button>
+          <button
+            type="button"
+            aria-label="Reset queue order"
+            title="Reset queue order"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-800 text-lg text-zinc-400 hover:bg-zinc-700"
+            onClick={player.resetQueueOrder}
+          >
+            ↺
+          </button>
         </section>
       </main>
     </div>
