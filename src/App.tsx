@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { StoragePanel } from './StoragePanel';
 import { useLibrarySync } from './hooks/useLibrarySync';
 import { useWakeLock } from './hooks/useWakeLock';
 import { cn } from './lib/cn';
@@ -106,6 +107,7 @@ function App() {
   const player = usePlayer();
   const activeRowRef = useRef<HTMLLIElement | null>(null);
   const [libraryStatus, setLibraryStatus] = useState('');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const entry = player.queue[player.trackIndex];
 
   function handleRefresh() {
@@ -152,15 +154,33 @@ function App() {
   return (
     <div className="flex min-h-svh items-center justify-center bg-zinc-950 text-zinc-100">
       <main className="flex max-h-svh w-full min-h-svh flex-col gap-5 bg-zinc-900 px-5 py-6 text-center sm:min-h-0 sm:max-h-[90svh] sm:w-105 sm:rounded-2xl sm:px-8 sm:py-6 sm:shadow-2xl">
-        <header>
-          <h1 className="text-2xl font-semibold">{entry.title}</h1>
-          <p className="mt-1 text-zinc-400">
+        <header className="relative">
+          <h1 className="truncate px-11 text-2xl font-semibold">{entry.title}</h1>
+          <p className="mt-1 truncate px-11 text-zinc-400">
             {entry.artist}
             {player.isTrackLoading ? ' · loading…' : ''}
           </p>
+          <button
+            type="button"
+            aria-label="Menu"
+            aria-pressed={isMenuOpen}
+            onClick={() => {
+              setIsMenuOpen((open) => !open);
+            }}
+            className={cn(
+              'absolute right-0 top-0 flex h-10 w-10 items-center justify-center rounded-full text-lg',
+              isMenuOpen
+                ? 'bg-emerald-400/20 text-emerald-400 ring-1 ring-emerald-400'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700',
+            )}
+          >
+            ☰
+          </button>
         </header>
 
-        <section aria-label="Tempo" className="flex gap-4">
+        {isMenuOpen && <StoragePanel refreshLibrary={player.refreshLibrary} />}
+
+        <section aria-label="Tempo" className={cn('flex gap-4', isMenuOpen && 'hidden')}>
           <TempoBox
             value={player.isOriginalTempo ? (originalBpm ?? '—') : player.targetBpm}
             label="current BPM"
@@ -255,7 +275,10 @@ function App() {
 
 
 
-        <section aria-label="Queue" className="min-h-0 flex-1 overflow-y-auto text-left">
+        <section
+          aria-label="Queue"
+          className={cn('min-h-0 flex-1 overflow-y-auto text-left', isMenuOpen && 'hidden')}
+        >
           <div className="mb-2 flex items-center justify-between gap-2">
             <h2 className="text-xs uppercase tracking-widest text-zinc-500">
               Queue · {player.queue.length} tracks

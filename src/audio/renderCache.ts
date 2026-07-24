@@ -167,6 +167,31 @@ export async function saveRender(
   await set(INDEX_KEY, index);
 }
 
+export type RenderStats = {
+  entries: number;
+  totalMB: number;
+};
+
+export async function getRenderStats(): Promise<RenderStats> {
+  const index = await readIndex();
+  const values = Object.values(index);
+  return {
+    entries: values.length,
+    totalMB: values.reduce((sum, entry) => sum + entry.sizeBytes, 0) / 1e6,
+  };
+}
+
+export async function clearRenders(): Promise<void> {
+  const { keys } = await import('idb-keyval');
+  const allKeys = await keys();
+  for (const key of allKeys) {
+    if (typeof key === 'string' && key.startsWith('render:')) {
+      await del(key);
+    }
+  }
+  await del(INDEX_KEY);
+}
+
 export async function loadRender(trackKey: string, rate: number): Promise<CachedRender | null> {
   if (!isSupported()) {
     return null;
