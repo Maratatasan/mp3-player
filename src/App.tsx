@@ -165,11 +165,13 @@ function App() {
             value={player.isOriginalTempo ? (originalBpm ?? '—') : player.targetBpm}
             label="current BPM"
             sublabel={
-              player.isOriginalTempo
-                ? 'following original'
-                : originalBpm === null
-                  ? 'target'
-                  : `target · at ${(player.targetBpm / originalBpm).toFixed(2)}×`
+              player.isRendering
+                ? 'rendering…'
+                : player.isOriginalTempo
+                  ? 'following original'
+                  : originalBpm === null
+                    ? 'target'
+                    : `target · at ${(player.targetBpm / originalBpm).toFixed(2)}×`
             }
             isActive={!player.isOriginalTempo}
             onSelect={() => {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { AuthRequiredError, fetchTrackUrl, fetchTracks, storePassphrase } from '../api/client';
-import { ElementEngine, detectBpm, type LoadedTrack, type TrackData } from './elementEngine';
+import { detectBpm, type LoadedTrack, type TrackData } from './elementEngine';
 import { WorkletEngine } from './engine';
 import type { PlaybackEngine } from './playbackEngine';
+import { RenderedEngine } from './renderedEngine';
 import { cacheBpm, cacheBytes, getCachedBpm, getCachedBytes } from './trackCache';
 
 export type { LoadedTrack } from './elementEngine';
@@ -114,7 +115,13 @@ function initPlayer(): Promise<PlayerSingleton> {
       // Used for BPM detection everywhere; also for playback via the worklet
       // engine outside iOS.
       const context = new AudioContext();
-      const engine: PlaybackEngine = isIOS() ? new ElementEngine() : new WorkletEngine(context);
+      // ?engine=rendered / ?engine=worklet override the platform default,
+      // so the iOS path can be exercised on a desktop browser.
+      const forced = new URLSearchParams(window.location.search).get('engine');
+      const useRendered = forced === 'rendered' || (forced !== 'worklet' && isIOS());
+      const engine: PlaybackEngine = useRendered
+        ? new RenderedEngine()
+        : new WorkletEngine(context);
       if (import.meta.env.DEV) {
         (window as unknown as { __tempoEngine?: PlaybackEngine }).__tempoEngine = engine;
       }
@@ -179,6 +186,7 @@ export type PlayerState = {
   trackIndex: number;
   currentTrack: LoadedTrack | null;
   isTrackLoading: boolean;
+  isRendering: boolean;
   isPlaying: boolean;
   positionSeconds: number;
   targetBpm: number;
@@ -209,6 +217,7 @@ export function usePlayer(): PlayerState {
   const [trackIndex, setTrackIndex] = useState(0);
   const [currentTrack, setCurrentTrack] = useState<LoadedTrack | null>(null);
   const [isTrackLoading, setIsTrackLoading] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [positionSeconds, setPositionSeconds] = useState(0);
   const [targetBpm, setTargetBpmState] = useState(initialTargetBpm);
@@ -227,6 +236,7 @@ export function usePlayer(): PlayerState {
         }
         engineRef.current = engine;
         contextRef.current = context;
+        engine.setOnRenderingChange?.(setIsRendering);
         setQueue(entries);
         // Resume on the track that was playing before the last refresh.
         const lastKey = localStorage.getItem(LAST_TRACK_STORAGE_KEY);
@@ -310,7 +320,9 @@ export function usePlayer(): PlayerState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey, loadAttempt]);
 
-  // Prefetch the visible next-in-queue so skipping feels instant.
+  // Prefetch the visible next-in-queue so skipping feels instant. On iOS
+  // this also pre-renders it at the target tempo, so auto-advance (even
+  // behind a locked screen) is a source swap rather than a live render.
   useEffect(() => {
     const context = contextRef.current;
     if (!context || queue.length < 2) {
@@ -327,6 +339,10 @@ export function usePlayer(): PlayerState {
                 ? { ...queued, originalBpm: track.originalBpm }
                 : queued,
             ),
+          );
+          void engineRef.current?.prepare?.(
+            track.bytes,
+            rateFor(track.originalBpm, targetBpm, isOriginalTempo),
           );
         }
       })
@@ -554,6 +570,7 @@ export function usePlayer(): PlayerState {
     trackIndex,
     currentTrack,
     isTrackLoading,
+    isRendering,
     isPlaying,
     positionSeconds,
     targetBpm,
