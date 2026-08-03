@@ -35,7 +35,9 @@ The library of record is the R2 bucket. The pipeline: **edit the Spotify playlis
 ./scripts/sync-library.sh
 ```
 
-What it does: [spotDL](https://github.com/spotDL/spotify-downloader) mirrors the playlist into `~/Music/mp3-player-library/` (matches each track on YouTube Music, embeds Spotify metadata, names files `Artist - Title.mp3` — the app parses artist/title from that filename convention), then `scripts/upload-library.mjs` uploads anything new to the bucket. Nothing is ever deleted from the bucket automatically.
+What it does: [spotDL](https://github.com/spotDL/spotify-downloader) mirrors the playlist into `~/Music/mp3-player-library/` (matches each track on YouTube Music, embeds Spotify metadata, names files `Artist - Title.mp3` — the app parses artist/title from that filename convention), then `scripts/upload-library.mjs` uploads anything new to the bucket and `scripts/prune-library.mjs` **hard-deletes bucket objects for tracks you removed from the playlist**. It's a full two-way mirror: the bucket ends up matching the playlist exactly (adds *and* removals), so a living playlist that shrinks or swaps tracks stays in sync.
+
+Prune safety: the local folder is the source of truth (after `spotdl sync` it equals the playlist). Prune aborts if the folder has 0 audio files or if it would remove >50% of the bucket — pass `--force` to override, or `./scripts/sync-library.sh --no-prune` to upload-only. To preview removals without touching the bucket: `node --env-file=.env scripts/prune-library.mjs ~/Music/mp3-player-library --dry-run`. `upload-library.mjs` on its own never deletes, so the one-off upload path below stays safe.
 
 Tooling behind it (reinstall if missing): `uv tool install --python 3.12 spotdl` (lands in `~/.local/bin`) and `spotdl --download-ffmpeg` once. To drop a one-off file into the bucket: `node --env-file=.env scripts/upload-library.mjs <folder>`.
 
